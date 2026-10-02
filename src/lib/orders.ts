@@ -48,13 +48,17 @@ export function parseOrders(body: unknown): ParsedOrder[] {
     .filter((o) => o.orderNo);
 }
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/g, "");
+const norm = (s: string) => s.toLowerCase().replace(/[\s\-_]/g, "");
+
+/** Map an order's payment method to one of the 4 filter options. */
+export function methodCategory(method: string): string {
+  const m = norm(method);
+  if (m.startsWith("stc")) return "STC Pay";
+  if (m.startsWith("barq")) return "Barq";
+  if (m.startsWith("urpay")) return "Urpay";
+  return "Banks";
+}
 
 export function methodMatches(method: string, selected: string[]): boolean {
-  const m = norm(method);
-  if (!m) return false;
-  return selected.some((s) => {
-    const n = norm(s);
-    return n && (m.includes(n) || n.includes(m));
-  });
+  return selected.includes(methodCategory(method));
 }

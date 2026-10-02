@@ -150,8 +150,9 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
   useEffect(() => {
     refreshStatus();
     getAnnouncement().then((r) => {
-      if (!r.ok || !r.body) return;
-      const b = r.body as unknown;
+      if (!r.ok) return;
+      let b: unknown = null;
+      try { b = JSON.parse(r.body); } catch { /* ignore */ }
       const text = typeof b === "string" ? b : findText(b);
       setAnnouncement(text);
     }).catch(() => {});

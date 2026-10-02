@@ -8,13 +8,15 @@ const HEADERS: Record<string, string> = {
     "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
 };
 
+type B = { code?: unknown; status?: unknown; msg?: unknown; message?: unknown; error?: unknown; success?: unknown; ok?: unknown };
+
 export type Upstream = { status: number; body: unknown };
 
 export async function upstream(path: string, init?: { method?: string; json?: unknown }): Promise<Upstream> {
   const res = await fetch(BASE + path, {
     method: init?.method ?? "GET",
     headers: HEADERS,
-    body: init?.json !== undefined ? JSON.stringify(init.json) : undefined,
+    body: init?.json !== undefined ? JSON.stringify(init.json) : null,
   });
   const text = await res.text();
   let body: unknown = text;
@@ -42,7 +44,7 @@ export function findKey(obj: unknown, names: string[], depth = 0): unknown {
 
 export function isAuthError(r: Upstream): boolean {
   if (r.status === 401 || r.status === 403) return true;
-  const b = r.body as Record<string, unknown> | null;
+  const b = r.body as B | null;
   if (b && typeof b === "object") {
     const code = b.code ?? b.status;
     if (code === 401 || code === "401") return true;
@@ -54,15 +56,15 @@ export function isAuthError(r: Upstream): boolean {
 
 export function isSuccess(r: Upstream): boolean {
   if (r.status < 200 || r.status >= 300) return false;
-  const b = r.body as Record<string, unknown> | null;
+  const b = r.body as B | null;
   if (!b || typeof b !== "object") return true;
   if (b.success === false || b.ok === false) return false;
-  if (b.code !== undefined && ![0, 1, 200, "0", "1", "200"].includes(b.code as never)) return false;
+  if (b.code !== undefined && ![0, 1, 200, "0", "1", "200"].includes(b.code as number)) return false;
   return true;
 }
 
 export function upstreamMessage(r: Upstream): string {
-  const b = r.body as Record<string, unknown> | null;
+  const b = r.body as B | null;
   if (b && typeof b === "object") return String(b.msg ?? b.message ?? b.error ?? `HTTP ${r.status}`);
   return `HTTP ${r.status}`;
 }

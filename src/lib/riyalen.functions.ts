@@ -88,9 +88,9 @@ export const statusFn = createServerFn({ method: "POST" })
 export const announcementFn = createServerFn({ method: "GET" }).handler(async () => {
   try {
     const r = await upstream(`/api/merchant/announcement?t=${Date.now()}`);
-    return { ok: true, body: r.body as never };
+    return { ok: true, body: JSON.stringify(r.body) };
   } catch {
-    return { ok: false, body: null };
+    return { ok: false, body: "null" };
   }
 });
 

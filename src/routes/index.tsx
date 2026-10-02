@@ -353,23 +353,26 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
           <div className="max-h-96 overflow-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-card text-left text-muted-foreground">
-                <tr><th className="p-2">Time</th><th className="p-2">Order</th><th className="p-2">Amount</th><th className="p-2">Parsed amount</th><th className="p-2">Method</th><th className="p-2">Result</th></tr>
+                <tr><th className="p-2">Time</th><th className="p-2">Order</th><th className="p-2">Amount (SAR)</th><th className="p-2">Method</th><th className="p-2">Option</th><th className="p-2">Result</th></tr>
               </thead>
               <tbody>
                 {logs.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-muted-foreground">No orders yet.</td></tr>}
                 {logs.map((l, i) => (
                   <tr key={i} className="border-t border-border">
-                    <td className="p-2 font-mono">{l.time}</td>
-                    <td className="p-2 font-mono">{l.orderNo}</td>
-                    <td className="p-2">{l.amount}</td>
-                    <td className="p-2">
-                      <div className="font-mono">{l.parsedAmount}</div>
+                    <td className="p-2 font-mono">
+                      <div>{l.time}</div>
+                      {l.createdAt && <div className="text-[10px] text-muted-foreground">{l.createdAt}</div>}
+                    </td>
+                    <td className="p-2 font-mono">
+                      <div>{l.orderNo}</div>
                       <details>
-                        <summary className="cursor-pointer text-muted-foreground">Raw · {l.amountField}</summary>
+                        <summary className="cursor-pointer text-muted-foreground">Raw</summary>
                         <pre className="max-w-xs overflow-auto whitespace-pre-wrap break-all font-mono text-[10px]">{l.raw}</pre>
                       </details>
                     </td>
-                    <td className="p-2">{l.method}</td>
+                    <td className="p-2 font-mono">{l.amount}</td>
+                    <td className="p-2">{l.payType}</td>
+                    <td className="p-2">{l.option}</td>
                     <td className={`p-2 ${l.result === "Accepted" ? "text-success" : l.result === "Failed" ? "text-destructive" : "text-muted-foreground"}`}>
                       {l.result}{l.reason ? ` · ${l.reason}` : ""}
                     </td>

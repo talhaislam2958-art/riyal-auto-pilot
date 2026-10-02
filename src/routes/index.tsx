@@ -23,7 +23,7 @@ export const Route = createFileRoute("/")({
   component: UserPanel,
 });
 
-const DEFAULT_METHODS = ["STC Pay", "Barq", "Urpay", "Bank transfer", "Al Rajhi", "SNB", "Riyad Bank", "Alinma", "SAB"];
+const DEFAULT_METHODS = ["STC Pay", "Barq", "Urpay", "Banks"];
 
 type Status = {
   username?: string;

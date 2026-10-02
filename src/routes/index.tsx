@@ -32,7 +32,7 @@ type Status = {
   active?: boolean;
   settings?: { admin_contact_text: string; admin_contact_link: string } | null;
 };
-type LogRow = { time: string; orderNo: string; amount: string; parsedAmount: string; amountField: string; raw: string; method: string; result: "Accepted" | "Skipped" | "Failed"; reason: string };
+type LogRow = { time: string; orderNo: string; amount: string; payType: string; option: string; createdAt: string; raw: string; result: "Accepted" | "Skipped" | "Failed"; reason: string };
 type Filters = { methods: string[]; min: number | null; max: number | null; interval: number };
 const DEFAULT_FILTERS: Filters = { methods: [], min: null, max: null, interval: 15 };
 const toNum = (s: string): number | null => { if (s.trim() === "") return null; const n = Number(s); return Number.isFinite(n) ? n : null; };

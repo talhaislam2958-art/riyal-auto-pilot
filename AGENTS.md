@@ -13,3 +13,4 @@
 - All calls to the upstream merchant site go through TanStack server functions in `src/lib/riyalen.functions.ts` (browser CORS blocks direct calls); approval is enforced server-side before any accept is forwarded.
 - Admin is a role in `user_roles`; the first account to call `claim_admin()` becomes the only admin. Admin panel uses RLS-guarded browser queries.
 - Upstream tokens live only in browser localStorage; never store merchant passwords or log tokens.
+- Self-hosting: the app reads Supabase only from env (browser: VITE_SUPABASE_URL/VITE_SUPABASE_PUBLISHABLE_KEY; server: SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY), so it can point at any Supabase project; Vercel builds need NITRO_PRESET=vercel because the default build preset targets Cloudflare.

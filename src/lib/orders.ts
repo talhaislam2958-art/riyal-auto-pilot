@@ -49,19 +49,19 @@ export function methodMatches(payType: string, selected: string[]): boolean {
 export function parseOrders(body: unknown): ParsedOrder[] {
   return findList(body)
     .map((o) => {
-      const orderNo = o.order_no === undefined || o.order_no === null ? "" : String(o.order_no);
-      const n = Number(o.amount_sar);
-      const amount = Number.isFinite(n) && o.amount_sar !== null && o.amount_sar !== undefined && o.amount_sar !== "" ? n : null;
-      const payType = o.pay_type === undefined || o.pay_type === null ? "" : String(o.pay_type);
+      const orderNo = o["order_no"] === undefined || o["order_no"] === null ? "" : String(o["order_no"]);
+      const n = Number(o["amount_sar"]);
+      const amount = Number.isFinite(n) && o["amount_sar"] !== null && o["amount_sar"] !== undefined && o["amount_sar"] !== "" ? n : null;
+      const payType = o["pay_type"] === undefined || o["pay_type"] === null ? "" : String(o["pay_type"]);
       return {
         orderNo,
         amount,
         payType,
         option: methodCategory(payType),
-        createdAt: o.created_at === undefined || o.created_at === null ? "" : String(o.created_at),
-        available: o.merchant_status === "available",
-        locked: o.small_duty_locked === true,
-        lockMessage: typeof o.small_duty_message === "string" ? o.small_duty_message : "",
+        createdAt: o["created_at"] === undefined || o["created_at"] === null ? "" : String(o["created_at"]),
+        available: o["merchant_status"] === "available",
+        locked: o["small_duty_locked"] === true,
+        lockMessage: typeof o["small_duty_message"] === "string" ? o["small_duty_message"] : "",
         raw: o,
       };
     })

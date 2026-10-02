@@ -217,14 +217,23 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
       const min: number = f.min ?? 0;
       const max: number = f.max ?? Infinity;
       setLastFilter(describe(f));
+      const maxLabel = f.max === null ? "∞" : String(f.max);
       for (const o of orders) {
         if (seen.current.has(o.orderNo)) continue;
         seen.current.add(o.orderNo);
-        const rawAmt = o.amountField ? (o.amountField.split(".").reduce<unknown>((x, k) => (x as Record<string, unknown>)?.[k], o.raw)) : undefined;
-        const base = { orderNo: o.orderNo, amount: rawAmt === undefined ? "?" : String(rawAmt), parsedAmount: o.amount === null ? "—" : String(o.amount), amountField: o.amountField || "none", raw: JSON.stringify(o.raw, null, 2), method: o.method || "?" };
-        if (!methodMatches(o.method, sel)) { addLog({ ...base, result: "Skipped", reason: "Method mismatch" }); continue; }
+        const base = {
+          orderNo: o.orderNo,
+          amount: o.amount === null ? "?" : String(o.amount),
+          payType: o.payType || "?",
+          option: o.option,
+          createdAt: o.createdAt,
+          raw: JSON.stringify(o.raw, null, 2),
+        };
+        if (!o.available) { addLog({ ...base, result: "Skipped", reason: "not available" }); continue; }
+        if (o.locked) { addLog({ ...base, result: "Skipped", reason: `locked: ${o.lockMessage}` }); continue; }
+        if (!methodMatches(o.payType, sel)) { addLog({ ...base, result: "Skipped", reason: `method ${o.option} not selected` }); continue; }
         if (o.amount === null) { addLog({ ...base, result: "Skipped", reason: "amount not found" }); continue; }
-        if (o.amount < min || o.amount > max) { addLog({ ...base, result: "Skipped", reason: "Amount out of range" }); continue; }
+        if (o.amount < min || o.amount > max) { addLog({ ...base, result: "Skipped", reason: `amount ${o.amount} outside ${min}-${maxLabel}` }); continue; }
         const a = await accept({ data: { token: session.token, order_no: o.orderNo } }).catch(() => ({ ok: false, error: "network_error" } as { ok: boolean; error?: string; authError?: boolean }));
         if (a.ok) {
           addLog({ ...base, result: "Accepted", reason: "" });

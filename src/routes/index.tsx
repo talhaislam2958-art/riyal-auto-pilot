@@ -32,11 +32,11 @@ type Status = {
   active?: boolean;
   settings?: { admin_contact_text: string; admin_contact_link: string } | null;
 };
-type LogRow = { time: string; orderNo: string; amount: string; payType: string; option: string; createdAt: string; raw: string; result: "Accepted" | "Skipped" | "Failed"; reason: string };
+type LogRow = { time: string; amount: number | null; option: string; result: "Accepted" | "Skipped" | "Failed"; reason: string };
 type Filters = { methods: string[]; min: number | null; max: number | null; interval: number };
 const DEFAULT_FILTERS: Filters = { methods: [], min: null, max: null, interval: 15 };
 const toNum = (s: string): number | null => { if (s.trim() === "") return null; const n = Number(s); return Number.isFinite(n) ? n : null; };
-const describe = (f: Filters) => `Filter: methods=${f.methods.join(",") || "none"} | amount ${f.min ?? 0}-${f.max ?? "∞"} | interval ${f.interval}s`;
+const hhmmss = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
 
 function useLocal<T>(key: string, initial: T) {
   const [v, setV] = useState<T>(initial);
@@ -129,7 +129,6 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
   const [maxAmt, setMaxAmt] = useState("");
   const [intervalDraft, setIntervalDraft] = useState("15");
   const [justSaved, setJustSaved] = useState(false);
-  const [lastFilter, setLastFilter] = useState("");
   useEffect(() => {
     if (!savedLoaded) return;
     setMethods(saved.methods);
@@ -150,7 +149,6 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
   const [sound, setSound] = useLocal<boolean>("oab_sound", true);
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [counts, setCounts] = useState({ accepted: 0, skipped: 0, failed: 0 });
-  const [raw, setRaw] = useState("");
   const [lastPoll, setLastPoll] = useState("");
   const [pollError, setPollError] = useState("");
   const seen = useRef<Set<string>>(new Set());
@@ -190,7 +188,7 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
   }, [refreshStatus, getAnnouncement]);
 
   const addLog = (row: Omit<LogRow, "time">) => {
-    setLogs((l) => [{ ...row, time: new Date().toLocaleTimeString() }, ...l].slice(0, 300));
+    setLogs((l) => [{ ...row, time: hhmmss(new Date()) }, ...l].slice(0, 300));
     setCounts((c) => ({
       accepted: c.accepted + (row.result === "Accepted" ? 1 : 0),
       skipped: c.skipped + (row.result === "Skipped" ? 1 : 0),
@@ -208,7 +206,6 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
       if (r.status === 429) { setPollError("Rate limited by server, retrying next interval."); return; }
       if (r.status === 0 || r.status >= 500) { setPollError(`Server/network error (${r.status || "offline"}), retrying.`); return; }
       setPollError("");
-      setRaw(r.body);
       let body: unknown = null;
       try { body = JSON.parse(r.body); } catch { /* ignore */ }
       const orders = parseOrders(body);
@@ -216,30 +213,21 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
       const sel = f.methods;
       const min: number = f.min ?? 0;
       const max: number = f.max ?? Infinity;
-      setLastFilter(describe(f));
-      const maxLabel = f.max === null ? "∞" : String(f.max);
       for (const o of orders) {
         if (seen.current.has(o.orderNo)) continue;
         seen.current.add(o.orderNo);
-        const base = {
-          orderNo: o.orderNo,
-          amount: o.amount === null ? "?" : String(o.amount),
-          payType: o.payType || "?",
-          option: o.option,
-          createdAt: o.createdAt,
-          raw: JSON.stringify(o.raw, null, 2),
-        };
-        if (!o.available) { addLog({ ...base, result: "Skipped", reason: "not available" }); continue; }
-        if (o.locked) { addLog({ ...base, result: "Skipped", reason: `locked: ${o.lockMessage}` }); continue; }
-        if (!methodMatches(o.payType, sel)) { addLog({ ...base, result: "Skipped", reason: `method ${o.option} not selected` }); continue; }
+        const base = { amount: o.amount, option: o.option };
+        if (!o.available) { addLog({ ...base, result: "Skipped", reason: "order not available" }); continue; }
+        if (o.locked) { addLog({ ...base, result: "Skipped", reason: "order locked" }); continue; }
+        if (!methodMatches(o.payType, sel)) { addLog({ ...base, result: "Skipped", reason: "method not selected" }); continue; }
         if (o.amount === null) { addLog({ ...base, result: "Skipped", reason: "amount not found" }); continue; }
-        if (o.amount < min || o.amount > max) { addLog({ ...base, result: "Skipped", reason: `amount ${o.amount} outside ${min}-${maxLabel}` }); continue; }
+        if (o.amount < min || o.amount > max) { addLog({ ...base, result: "Skipped", reason: "amount out of range" }); continue; }
         const a = await accept({ data: { token: session.token, order_no: o.orderNo } }).catch(() => ({ ok: false, error: "network_error" } as { ok: boolean; error?: string; authError?: boolean }));
         if (a.ok) {
           addLog({ ...base, result: "Accepted", reason: "" });
           if (snd) beep();
         } else {
-          addLog({ ...base, result: "Failed", reason: a.error ?? "error" });
+          addLog({ ...base, result: "Failed", reason: a.error === "not_approved" ? "not approved" : (a.error ?? "accept failed") });
           if ("authError" in a && a.authError) return expire();
           if (a.error === "not_approved") { setRunning(false); refreshStatus(); return; }
         }
@@ -322,7 +310,6 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
             <label className="flex items-center gap-2">Sound on accept <Switch checked={sound} onCheckedChange={setSound} /></label>
           </div>
           {!running && saved.methods.length === 0 && <p className="text-xs text-warning">Select and save at least one payment method to start.</p>}
-          {running && lastFilter && <p className="font-mono text-xs text-muted-foreground">{lastFilter}</p>}
           {pollError && <p className="text-xs text-warning">{pollError}</p>}
         </section>
 
@@ -345,7 +332,6 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
             <Button onClick={saveFilters} disabled={!dirty}>Save filters</Button>
             {dirty ? <span className="text-xs text-warning">Unsaved changes</span> : justSaved ? <span className="text-xs text-success">Saved</span> : null}
           </div>
-          <p className="font-mono text-xs text-muted-foreground">Active: {describe(saved)}</p>
         </section>
 
         <section className="rounded-xl border border-border bg-card">
@@ -353,29 +339,16 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
           <div className="max-h-96 overflow-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-card text-left text-muted-foreground">
-                <tr><th className="p-2">Time</th><th className="p-2">Order</th><th className="p-2">Amount (SAR)</th><th className="p-2">Method</th><th className="p-2">Option</th><th className="p-2">Result</th></tr>
+                <tr><th className="p-2">Time</th><th className="p-2">Amount</th><th className="p-2">Method</th><th className="p-2">Result</th></tr>
               </thead>
               <tbody>
-                {logs.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-muted-foreground">No orders yet.</td></tr>}
+                {logs.length === 0 && <tr><td colSpan={4} className="p-4 text-center text-muted-foreground">No orders yet.</td></tr>}
                 {logs.map((l, i) => (
                   <tr key={i} className="border-t border-border">
-                    <td className="p-2 font-mono">
-                      <div>{l.time}</div>
-                      {l.createdAt && <div className="text-[10px] text-muted-foreground">{l.createdAt}</div>}
-                    </td>
-                    <td className="p-2 font-mono">
-                      <div>{l.orderNo}</div>
-                      <details>
-                        <summary className="cursor-pointer text-muted-foreground">Raw</summary>
-                        <pre className="max-w-xs overflow-auto whitespace-pre-wrap break-all font-mono text-[10px]">{l.raw}</pre>
-                      </details>
-                    </td>
-                    <td className="p-2 font-mono">{l.amount}</td>
-                    <td className="p-2">{l.payType}</td>
+                    <td className="p-2 font-mono">{l.time}</td>
+                    <td className="p-2 font-mono">{l.amount === null ? "—" : `${l.amount} SAR`}</td>
                     <td className="p-2">{l.option}</td>
-                    <td className={`p-2 ${l.result === "Accepted" ? "text-success" : l.result === "Failed" ? "text-destructive" : "text-muted-foreground"}`}>
-                      {l.result}{l.reason ? ` · ${l.reason}` : ""}
-                    </td>
+                    <td className="p-2"><ResultBadge result={l.result} reason={l.reason} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -383,12 +356,6 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
           </div>
         </section>
 
-        <details className="rounded-xl border border-border bg-card p-3">
-          <summary className="cursor-pointer text-sm font-semibold">Debug: raw orders response</summary>
-          <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
-            {raw ? prettify(raw) : "No response yet. Start the bot to poll."}
-          </pre>
-        </details>
       </div>
     </main>
   );
@@ -403,8 +370,9 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
   );
 }
 
-function prettify(s: string) {
-  try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+function ResultBadge({ result, reason }: { result: "Accepted" | "Skipped" | "Failed"; reason: string }) {
+  const tone = result === "Accepted" ? "bg-success/15 text-success" : result === "Skipped" ? "bg-warning/15 text-warning" : "bg-destructive/15 text-destructive";
+  return <span className={`inline-block cursor-help rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`} title={reason || undefined}>{result}</span>;
 }
 
 function findText(b: unknown, depth = 0): string {

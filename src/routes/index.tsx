@@ -32,7 +32,11 @@ type Status = {
   active?: boolean;
   settings?: { admin_contact_text: string; admin_contact_link: string } | null;
 };
-type LogRow = { time: string; orderNo: string; amount: string; method: string; result: "Accepted" | "Skipped" | "Failed"; reason: string };
+type LogRow = { time: string; orderNo: string; amount: string; parsedAmount: string; amountField: string; raw: string; method: string; result: "Accepted" | "Skipped" | "Failed"; reason: string };
+type Filters = { methods: string[]; min: number | null; max: number | null; interval: number };
+const DEFAULT_FILTERS: Filters = { methods: [], min: null, max: null, interval: 15 };
+const toNum = (s: string): number | null => { if (s.trim() === "") return null; const n = Number(s); return Number.isFinite(n) ? n : null; };
+const describe = (f: Filters) => `Filter: methods=${f.methods.join(",") || "none"} | amount ${f.min ?? 0}-${f.max ?? "∞"} | interval ${f.interval}s`;
 
 function useLocal<T>(key: string, initial: T) {
   const [v, setV] = useState<T>(initial);
@@ -112,11 +116,37 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
   const [status, setStatus] = useState<Status | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [running, setRunning] = useState(false);
-  const [intervalSec, setIntervalSec] = useLocal<number>("oab_interval", 15);
-  const [rawMethods, setMethods] = useLocal<string[]>("oab_methods", []);
-  const methods = rawMethods.filter((m) => DEFAULT_METHODS.includes(m));
-  const [minAmt, setMinAmt] = useLocal<string>("oab_min", "");
-  const [maxAmt, setMaxAmt] = useLocal<string>("oab_max", "");
+  const [savedRaw, setSaved, savedLoaded] = useLocal<Filters>("oab_filters", DEFAULT_FILTERS);
+  const saved: Filters = {
+    methods: (savedRaw.methods ?? []).filter((m) => DEFAULT_METHODS.includes(m)),
+    min: typeof savedRaw.min === "number" ? savedRaw.min : null,
+    max: typeof savedRaw.max === "number" ? savedRaw.max : null,
+    interval: Math.max(10, Number(savedRaw.interval) || 15),
+  };
+  const intervalSec = saved.interval;
+  const [methods, setMethods] = useState<string[]>([]);
+  const [minAmt, setMinAmt] = useState("");
+  const [maxAmt, setMaxAmt] = useState("");
+  const [intervalDraft, setIntervalDraft] = useState("15");
+  const [justSaved, setJustSaved] = useState(false);
+  const [lastFilter, setLastFilter] = useState("");
+  useEffect(() => {
+    if (!savedLoaded) return;
+    setMethods(saved.methods);
+    setMinAmt(saved.min === null ? "" : String(saved.min));
+    setMaxAmt(saved.max === null ? "" : String(saved.max));
+    setIntervalDraft(String(saved.interval));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedLoaded]);
+  const draft: Filters = { methods, min: toNum(minAmt), max: toNum(maxAmt), interval: Math.max(10, Number(intervalDraft) || 10) };
+  const dirty = JSON.stringify([...draft.methods].sort()) !== JSON.stringify([...saved.methods].sort())
+    || draft.min !== saved.min || draft.max !== saved.max || draft.interval !== saved.interval;
+  const saveFilters = () => {
+    setSaved(draft);
+    setIntervalDraft(String(draft.interval));
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 2000);
+  };
   const [sound, setSound] = useLocal<boolean>("oab_sound", true);
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [counts, setCounts] = useState({ accepted: 0, skipped: 0, failed: 0 });
@@ -126,8 +156,8 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
   const seen = useRef<Set<string>>(new Set());
   const busy = useRef(false);
 
-  const cfg = useRef({ methods, minAmt, maxAmt, sound });
-  cfg.current = { methods, minAmt, maxAmt, sound };
+  const cfg = useRef({ filters: saved, sound });
+  cfg.current = { filters: saved, sound };
 
   const expire = useCallback(() => {
     setRunning(false);
@@ -182,15 +212,19 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
       let body: unknown = null;
       try { body = JSON.parse(r.body); } catch { /* ignore */ }
       const orders = parseOrders(body);
-      const { methods: sel, minAmt: mn, maxAmt: mx, sound: snd } = cfg.current;
-      const min = mn === "" ? -Infinity : Number(mn);
-      const max = mx === "" ? Infinity : Number(mx);
+      const { filters: f, sound: snd } = cfg.current;
+      const sel = f.methods;
+      const min: number = f.min ?? 0;
+      const max: number = f.max ?? Infinity;
+      setLastFilter(describe(f));
       for (const o of orders) {
         if (seen.current.has(o.orderNo)) continue;
         seen.current.add(o.orderNo);
-        const base = { orderNo: o.orderNo, amount: o.amount === null ? "?" : String(o.amount), method: o.method || "?" };
+        const rawAmt = o.amountField ? (o.amountField.split(".").reduce<unknown>((x, k) => (x as Record<string, unknown>)?.[k], o.raw)) : undefined;
+        const base = { orderNo: o.orderNo, amount: rawAmt === undefined ? "?" : String(rawAmt), parsedAmount: o.amount === null ? "—" : String(o.amount), amountField: o.amountField || "none", raw: JSON.stringify(o.raw, null, 2), method: o.method || "?" };
         if (!methodMatches(o.method, sel)) { addLog({ ...base, result: "Skipped", reason: "Method mismatch" }); continue; }
-        if (o.amount === null || o.amount < min || o.amount > max) { addLog({ ...base, result: "Skipped", reason: "Amount out of range" }); continue; }
+        if (o.amount === null) { addLog({ ...base, result: "Skipped", reason: "amount not found" }); continue; }
+        if (o.amount < min || o.amount > max) { addLog({ ...base, result: "Skipped", reason: "Amount out of range" }); continue; }
         const a = await accept({ data: { token: session.token, order_no: o.orderNo } }).catch(() => ({ ok: false, error: "network_error" } as { ok: boolean; error?: string; authError?: boolean }));
         if (a.ok) {
           addLog({ ...base, result: "Accepted", reason: "" });
@@ -258,7 +292,7 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
             <Button
               className="flex-1"
               variant={running ? "destructive" : "default"}
-              disabled={!active && !running}
+              disabled={!running && (!active || saved.methods.length === 0)}
               onClick={() => setRunning((r) => !r)}
             >
               {running ? "Stop" : "Start"}
@@ -269,9 +303,8 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
                 id="int"
                 type="number"
                 min={10}
-                value={intervalSec}
-                onChange={(e) => setIntervalSec(Number(e.target.value) || 10)}
-                onBlur={() => setIntervalSec((v) => Math.max(10, v))}
+                value={intervalDraft}
+                onChange={(e) => setIntervalDraft(e.target.value)}
               />
             </div>
           </div>
@@ -279,6 +312,8 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
             <span>{running ? `Running · last poll ${lastPoll || "—"}` : "Stopped"}</span>
             <label className="flex items-center gap-2">Sound on accept <Switch checked={sound} onCheckedChange={setSound} /></label>
           </div>
+          {!running && saved.methods.length === 0 && <p className="text-xs text-warning">Select and save at least one payment method to start.</p>}
+          {running && lastFilter && <p className="font-mono text-xs text-muted-foreground">{lastFilter}</p>}
           {pollError && <p className="text-xs text-warning">{pollError}</p>}
         </section>
 
@@ -297,6 +332,11 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
             <Input type="number" placeholder="Min" value={minAmt} onChange={(e) => setMinAmt(e.target.value)} />
             <Input type="number" placeholder="Max" value={maxAmt} onChange={(e) => setMaxAmt(e.target.value)} />
           </div>
+          <div className="flex items-center gap-3 pt-1">
+            <Button onClick={saveFilters} disabled={!dirty}>Save filters</Button>
+            {dirty ? <span className="text-xs text-warning">Unsaved changes</span> : justSaved ? <span className="text-xs text-success">Saved</span> : null}
+          </div>
+          <p className="font-mono text-xs text-muted-foreground">Active: {describe(saved)}</p>
         </section>
 
         <section className="rounded-xl border border-border bg-card">
@@ -304,15 +344,22 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
           <div className="max-h-96 overflow-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-card text-left text-muted-foreground">
-                <tr><th className="p-2">Time</th><th className="p-2">Order</th><th className="p-2">Amount</th><th className="p-2">Method</th><th className="p-2">Result</th></tr>
+                <tr><th className="p-2">Time</th><th className="p-2">Order</th><th className="p-2">Amount</th><th className="p-2">Parsed amount</th><th className="p-2">Method</th><th className="p-2">Result</th></tr>
               </thead>
               <tbody>
-                {logs.length === 0 && <tr><td colSpan={5} className="p-4 text-center text-muted-foreground">No orders yet.</td></tr>}
+                {logs.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-muted-foreground">No orders yet.</td></tr>}
                 {logs.map((l, i) => (
                   <tr key={i} className="border-t border-border">
                     <td className="p-2 font-mono">{l.time}</td>
                     <td className="p-2 font-mono">{l.orderNo}</td>
                     <td className="p-2">{l.amount}</td>
+                    <td className="p-2">
+                      <div className="font-mono">{l.parsedAmount}</div>
+                      <details>
+                        <summary className="cursor-pointer text-muted-foreground">Raw · {l.amountField}</summary>
+                        <pre className="max-w-xs overflow-auto whitespace-pre-wrap break-all font-mono text-[10px]">{l.raw}</pre>
+                      </details>
+                    </td>
                     <td className="p-2">{l.method}</td>
                     <td className={`p-2 ${l.result === "Accepted" ? "text-success" : l.result === "Failed" ? "text-destructive" : "text-muted-foreground"}`}>
                       {l.result}{l.reason ? ` · ${l.reason}` : ""}

@@ -113,12 +113,11 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
   const [announcement, setAnnouncement] = useState("");
   const [running, setRunning] = useState(false);
   const [intervalSec, setIntervalSec] = useLocal<number>("oab_interval", 15);
-  const [methods, setMethods] = useLocal<string[]>("oab_methods", []);
-  const [customMethods, setCustomMethods] = useLocal<string[]>("oab_custom_methods", []);
+  const [rawMethods, setMethods] = useLocal<string[]>("oab_methods", []);
+  const methods = rawMethods.filter((m) => DEFAULT_METHODS.includes(m));
   const [minAmt, setMinAmt] = useLocal<string>("oab_min", "");
   const [maxAmt, setMaxAmt] = useLocal<string>("oab_max", "");
   const [sound, setSound] = useLocal<boolean>("oab_sound", true);
-  const [newMethod, setNewMethod] = useState("");
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [counts, setCounts] = useState({ accepted: 0, skipped: 0, failed: 0 });
   const [raw, setRaw] = useState("");
@@ -217,7 +216,6 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
   }, [running, intervalSec, poll]);
 
   const active = !!status?.active;
-  const allMethods = [...DEFAULT_METHODS, ...customMethods];
   const toggleMethod = (m: string) => setMethods((s) => (s.includes(m) ? s.filter((x) => x !== m) : [...s, m]));
 
   return (
@@ -287,28 +285,13 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
         <section className="space-y-3 rounded-xl border border-border bg-card p-4">
           <h2 className="text-sm font-semibold">Payment methods</h2>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {allMethods.map((m) => (
+            {DEFAULT_METHODS.map((m) => (
               <label key={m} className="flex items-center gap-2 text-sm">
                 <Checkbox checked={methods.includes(m)} onCheckedChange={() => toggleMethod(m)} />
                 <span className="flex-1">{m}</span>
-                {customMethods.includes(m) && (
-                  <button type="button" className="text-xs text-muted-foreground" onClick={() => { setCustomMethods((c) => c.filter((x) => x !== m)); setMethods((s) => s.filter((x) => x !== m)); }}>✕</button>
-                )}
               </label>
             ))}
           </div>
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const v = newMethod.trim();
-              if (v && !allMethods.includes(v)) { setCustomMethods((c) => [...c, v]); setMethods((s) => [...s, v]); }
-              setNewMethod("");
-            }}
-          >
-            <Input placeholder="Add custom method" value={newMethod} onChange={(e) => setNewMethod(e.target.value)} />
-            <Button type="submit" variant="secondary">Add</Button>
-          </form>
           <h2 className="pt-2 text-sm font-semibold">Amount (SAR)</h2>
           <div className="grid grid-cols-2 gap-2">
             <Input type="number" placeholder="Min" value={minAmt} onChange={(e) => setMinAmt(e.target.value)} />

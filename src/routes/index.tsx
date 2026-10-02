@@ -32,7 +32,7 @@ type Status = {
   active?: boolean;
   settings?: { admin_contact_text: string; admin_contact_link: string } | null;
 };
-type LogRow = { time: string; orderNo: string; amount: string; parsedAmount: string; amountField: string; raw: string; method: string; result: "Accepted" | "Skipped" | "Failed"; reason: string };
+type LogRow = { time: string; orderNo: string; amount: string; payType: string; option: string; createdAt: string; raw: string; result: "Accepted" | "Skipped" | "Failed"; reason: string };
 type Filters = { methods: string[]; min: number | null; max: number | null; interval: number };
 const DEFAULT_FILTERS: Filters = { methods: [], min: null, max: null, interval: 15 };
 const toNum = (s: string): number | null => { if (s.trim() === "") return null; const n = Number(s); return Number.isFinite(n) ? n : null; };
@@ -217,14 +217,23 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
       const min: number = f.min ?? 0;
       const max: number = f.max ?? Infinity;
       setLastFilter(describe(f));
+      const maxLabel = f.max === null ? "∞" : String(f.max);
       for (const o of orders) {
         if (seen.current.has(o.orderNo)) continue;
         seen.current.add(o.orderNo);
-        const rawAmt = o.amountField ? (o.amountField.split(".").reduce<unknown>((x, k) => (x as Record<string, unknown>)?.[k], o.raw)) : undefined;
-        const base = { orderNo: o.orderNo, amount: rawAmt === undefined ? "?" : String(rawAmt), parsedAmount: o.amount === null ? "—" : String(o.amount), amountField: o.amountField || "none", raw: JSON.stringify(o.raw, null, 2), method: o.method || "?" };
-        if (!methodMatches(o.method, sel)) { addLog({ ...base, result: "Skipped", reason: "Method mismatch" }); continue; }
+        const base = {
+          orderNo: o.orderNo,
+          amount: o.amount === null ? "?" : String(o.amount),
+          payType: o.payType || "?",
+          option: o.option,
+          createdAt: o.createdAt,
+          raw: JSON.stringify(o.raw, null, 2),
+        };
+        if (!o.available) { addLog({ ...base, result: "Skipped", reason: "not available" }); continue; }
+        if (o.locked) { addLog({ ...base, result: "Skipped", reason: `locked: ${o.lockMessage}` }); continue; }
+        if (!methodMatches(o.payType, sel)) { addLog({ ...base, result: "Skipped", reason: `method ${o.option} not selected` }); continue; }
         if (o.amount === null) { addLog({ ...base, result: "Skipped", reason: "amount not found" }); continue; }
-        if (o.amount < min || o.amount > max) { addLog({ ...base, result: "Skipped", reason: "Amount out of range" }); continue; }
+        if (o.amount < min || o.amount > max) { addLog({ ...base, result: "Skipped", reason: `amount ${o.amount} outside ${min}-${maxLabel}` }); continue; }
         const a = await accept({ data: { token: session.token, order_no: o.orderNo } }).catch(() => ({ ok: false, error: "network_error" } as { ok: boolean; error?: string; authError?: boolean }));
         if (a.ok) {
           addLog({ ...base, result: "Accepted", reason: "" });
@@ -344,23 +353,26 @@ function Dashboard({ session, onLogout }: { session: { token: string; username: 
           <div className="max-h-96 overflow-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-card text-left text-muted-foreground">
-                <tr><th className="p-2">Time</th><th className="p-2">Order</th><th className="p-2">Amount</th><th className="p-2">Parsed amount</th><th className="p-2">Method</th><th className="p-2">Result</th></tr>
+                <tr><th className="p-2">Time</th><th className="p-2">Order</th><th className="p-2">Amount (SAR)</th><th className="p-2">Method</th><th className="p-2">Option</th><th className="p-2">Result</th></tr>
               </thead>
               <tbody>
                 {logs.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-muted-foreground">No orders yet.</td></tr>}
                 {logs.map((l, i) => (
                   <tr key={i} className="border-t border-border">
-                    <td className="p-2 font-mono">{l.time}</td>
-                    <td className="p-2 font-mono">{l.orderNo}</td>
-                    <td className="p-2">{l.amount}</td>
-                    <td className="p-2">
-                      <div className="font-mono">{l.parsedAmount}</div>
+                    <td className="p-2 font-mono">
+                      <div>{l.time}</div>
+                      {l.createdAt && <div className="text-[10px] text-muted-foreground">{l.createdAt}</div>}
+                    </td>
+                    <td className="p-2 font-mono">
+                      <div>{l.orderNo}</div>
                       <details>
-                        <summary className="cursor-pointer text-muted-foreground">Raw · {l.amountField}</summary>
+                        <summary className="cursor-pointer text-muted-foreground">Raw</summary>
                         <pre className="max-w-xs overflow-auto whitespace-pre-wrap break-all font-mono text-[10px]">{l.raw}</pre>
                       </details>
                     </td>
-                    <td className="p-2">{l.method}</td>
+                    <td className="p-2 font-mono">{l.amount}</td>
+                    <td className="p-2">{l.payType}</td>
+                    <td className="p-2">{l.option}</td>
                     <td className={`p-2 ${l.result === "Accepted" ? "text-success" : l.result === "Failed" ? "text-destructive" : "text-muted-foreground"}`}>
                       {l.result}{l.reason ? ` · ${l.reason}` : ""}
                     </td>
